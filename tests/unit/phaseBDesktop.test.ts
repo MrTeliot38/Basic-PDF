@@ -118,9 +118,9 @@ HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts
     Arial (TrueType)    REG_SZ    arial.ttf
     Arial Bold (TrueType)    REG_SZ    arialbd.ttf
     Georgia Italic (TrueType)    REG_SZ    georgiai.ttf
-    Outside Escape (TrueType)    REG_SZ    ..\\..\\secret.ttf
+    Outside Escape (TrueType)    REG_SZ    ../../secret.ttf
 `;
-    const winFonts = 'C:\\Windows\\Fonts';
+    const winFonts = path.join(os.tmpdir(), 'WinFontsTest');
     const parsed = parseWindowsFontsRegistryOutput(sampleStdout, winFonts, [winFonts]);
     expect(parsed.has('arial')).toBe(true);
     expect(parsed.get('arial')?.variants.bold).toBe(path.join(winFonts, 'arialbd.ttf'));
@@ -138,13 +138,25 @@ HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts
   });
 
   it('énumère les polices Windows réelles et intègre une vraie police TTF avec accents Unicode dans le PDF', async () => {
-    const installed = await enumerateInstalledWindowsFonts();
-    expect(installed.length).toBeGreaterThan(5);
+    let ttfPath: string | null = null;
+    if (process.platform === 'win32') {
+      const installed = await enumerateInstalledWindowsFonts();
+      expect(installed.length).toBeGreaterThan(5);
+      ttfPath = resolveFontFilePath(installed, '"Arial", sans-serif', false, false);
+    } else {
+      // Sur Linux/CI Android, vérifie tout de même l'intégration TTF + Unicode avec une police TTF libre fournie
+      const fallbackTtf = path.join(
+        process.cwd(),
+        'node_modules',
+        'pdfjs-dist',
+        'standard_fonts',
+        'LiberationSans-Regular.ttf',
+      );
+      ttfPath = fs.existsSync(fallbackTtf) ? fallbackTtf : null;
+    }
+    expect(ttfPath).toBeTruthy();
 
-    const arialPath = resolveFontFilePath(installed, '"Arial", sans-serif', false, false);
-    expect(arialPath).toBeTruthy();
-
-    const ttfBytes = new Uint8Array(fs.readFileSync(arialPath!));
+    const ttfBytes = new Uint8Array(fs.readFileSync(ttfPath!));
     const basePdf = buildSamplePdfBytes('Base document', 1);
 
     const outBytes = await serializeDocumentEditsToPdf({
