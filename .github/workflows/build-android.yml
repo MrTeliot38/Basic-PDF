@@ -1,0 +1,87 @@
+name: Construction Android (Basic PDF APK)
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Installer Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Préparer le SDK Android
+        uses: android-actions/setup-android@v3
+
+      - name: Installer la plateforme SDK Android 36 et build-tools
+        run: yes | "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-36" "build-tools;35.0.0" || true
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Lancer les tests unitaires
+        run: npm run test:unit
+
+      - name: Préparer la clé de signature Android (depuis Secrets GitHub ou clé temporaire de test)
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/basic-pdf-ci.jks
+            echo "ANDROID_KEYSTORE_PATH=basic-pdf-ci.jks" >> $GITHUB_ENV
+          else
+            echo "::warning::Secrets de signature absents : génération d'une clé temporaire pour cette construction."
+            keytool -genkeypair -v -keystore android/basic-pdf-ci.jks -storepass basicpdf-temp-ci -keypass basicpdf-temp-ci -alias basicpdf-ci -keyalg RSA -keysize 2048 -validity 365 -dname "CN=Basic PDF, OU=Mobile, O=Basic PDF, L=Paris, S=IDF, C=FR"
+            echo "ANDROID_KEYSTORE_PATH=basic-pdf-ci.jks" >> $GITHUB_ENV
+            echo "ANDROID_KEYSTORE_PASSWORD=basicpdf-temp-ci" >> $GITHUB_ENV
+            echo "ANDROID_KEY_ALIAS=basicpdf-ci" >> $GITHUB_ENV
+            echo "ANDROID_KEY_PASSWORD=basicpdf-temp-ci" >> $GITHUB_ENV
+          fi
+
+      - name: Construire l'APK Android et calculer son SHA-256
+        run: |
+          chmod +x android/gradlew
+          npm run dist:android
+
+      - name: Publier les artefacts Android
+        uses: actions/upload-artifact@v4
+        with:
+          name: basic-pdf-android
+          path: |
+            release/*.apk
+            release/*.apk.sha256
+            release/SHA256SUMS-android.txt
+
+      - name: Attacher l'APK à la Release GitHub lors d'un tag de version
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release/*.apk
+            release/*.apk.sha256
+            release/SHA256SUMS-android.txt

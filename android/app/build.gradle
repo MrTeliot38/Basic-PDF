@@ -1,0 +1,91 @@
+apply plugin: 'com.android.application'
+
+import groovy.json.JsonSlurper
+
+// Lecture de la version depuis package.json et calcul automatique du versionCode :
+// versionCode = majeur * 10000 + mineur * 100 + correctif
+def pkgJsonFile = file('../../package.json')
+def pkgJson = new JsonSlurper().parseText(pkgJsonFile.getText('UTF-8'))
+def appVersionName = (pkgJson.version ?: '0.1.0').toString()
+def verParts = appVersionName.replaceFirst(/^v/, '').tokenize('.')
+def verMajor = (verParts.size() > 0 ? verParts[0].toInteger() : 0)
+def verMinor = (verParts.size() > 1 ? verParts[1].toInteger() : 1)
+def verPatch = (verParts.size() > 2 ? verParts[2].split('[-+]')[0].toInteger() : 0)
+def computedVersionCode = Math.max(1, verMajor * 10000 + verMinor * 100 + verPatch)
+
+def keystorePropsFile = rootProject.file('keystore.properties')
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
+android {
+    namespace = "fr.basicpdf.app"
+    compileSdk = rootProject.ext.compileSdkVersion
+
+    defaultConfig {
+        applicationId "fr.basicpdf.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode computedVersionCode
+        versionName appVersionName
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+
+    signingConfigs {
+        release {
+            def ksPath = System.getenv('ANDROID_KEYSTORE_PATH') ?: keystoreProps.getProperty('storeFile')
+            if (ksPath) {
+                def ksFile = file(ksPath).exists() ? file(ksPath) : rootProject.file(ksPath)
+                if (ksFile.exists()) {
+                    storeFile ksFile
+                    storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD') ?: keystoreProps.getProperty('storePassword')
+                    keyAlias System.getenv('ANDROID_KEY_ALIAS') ?: keystoreProps.getProperty('keyAlias')
+                    keyPassword System.getenv('ANDROID_KEY_PASSWORD') ?: keystoreProps.getProperty('keyPassword')
+                }
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (signingConfigs.release.storeFile != null) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+repositories {
+    flatDir {
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied.")
+}

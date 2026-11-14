@@ -1,0 +1,31 @@
+# Dépendances et builds
+node_modules/
+dist/
+dist-electron/
+release/
+*.tsbuildinfo
+
+# Tests et rapports
+test-results/
+playwright-report/
+blob-report/
+
+# Android et clés de signature (JAMAIS sur GitHub)
+*.jks
+*.keystore
+keystore.properties
+key.properties
+android/keystore.properties
+android/key.properties
+android/local.properties
+android/app/build/
+android/build/
+android/.gradle/
+.gradle/
+*keystore-backup*
+
+# Fichiers locaux et environnement
+.env
+.env.local
+.DS_Store
+Thumbs.db

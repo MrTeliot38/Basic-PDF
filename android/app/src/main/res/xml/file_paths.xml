@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Dossiers temporaires sûrs pour le partage PDF, la caméra et les mises à jour APK vérifiées -->
+    <cache-path name="shared_pdfs" path="shared/" />
+    <cache-path name="camera_captures" path="camera/" />
+    <cache-path name="update_apks" path="updates/" />
+    <cache-path name="all_cache" path="." />
+    <files-path name="internal_files" path="." />
+    <external-path name="external_files" path="." />
+</paths>
