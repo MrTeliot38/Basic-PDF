@@ -1,7 +1,7 @@
 {
   "name": "basic-pdf",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Basic PDF — Lecteur et éditeur PDF libre, gratuit, 100 % hors ligne et en français.",
   "author": "Basic PDF",
   "license": "MIT",

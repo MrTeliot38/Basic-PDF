@@ -4,7 +4,15 @@ import { createWorker, OEM, PSM } from 'tesseract.js';
 import type { EditableTextBlock } from '../types/pdf';
 import { createId } from './formatters';
 import { analyzeTextVisualStyle } from './backgroundPreserver';
-import { isDesktopApp, resolveBestDesktopFontMatch } from './desktopBridge';
+import {
+  isDesktopApp,
+  loadAvailableCandidateFonts,
+  resolveBestDesktopFontMatch,
+} from './desktopBridge';
+import {
+  harmonizeOcrParagraphFonts,
+  recognizeFontFromScanBlock,
+} from './fontRecognizer';
 
 export interface OcrRegion {
   x: number;
@@ -370,6 +378,7 @@ export async function runOfflineOcrOnPage(
     },
   });
 
+  const { fonts: candidateFonts, usingSystemFonts } = await loadAvailableCandidateFonts();
   const blocks: EditableTextBlock[] = [];
 
   try {
@@ -451,12 +460,26 @@ export async function runOfflineOcrOnPage(
                 height: maxY - minY,
               });
 
+              const recognized = recognizeFontFromScanBlock({
+                pageCanvas,
+                blockRectPx: {
+                  x: minX,
+                  y: minY,
+                  width: maxX - minX,
+                  height: maxY - minY,
+                },
+                words: group,
+                blockText: text,
+                installedFamilies: candidateFonts,
+                usingSystemFonts,
+              });
+
               const style = {
-                fontFamily: visual.fontFamily,
+                fontFamily: recognized ? recognized.fontFamily : visual.fontFamily,
                 fontSize: fontSizePdf,
                 color: visual.color,
-                bold: visual.bold,
-                italic: visual.italic,
+                bold: recognized ? recognized.bold : visual.bold,
+                italic: recognized ? recognized.italic : visual.italic,
               };
 
               blocks.push({
@@ -476,7 +499,9 @@ export async function runOfflineOcrOnPage(
                 height: hPdf,
                 style,
                 originalStyle: { ...style },
-                detectedFontLabel: visual.detectedFontLabel,
+                detectedFontLabel: recognized
+                  ? recognized.detectedFontLabel
+                  : visual.detectedFontLabel,
               });
             }
           }
@@ -487,9 +512,15 @@ export async function runOfflineOcrOnPage(
     await worker.terminate();
   }
 
-  // Sous Windows (Electron), associe la police détectée à la police système installée la plus proche
+  // Stabilise les polices reconnues au sein d'un même paragraphe multi-lignes
+  harmonizeOcrParagraphFonts(blocks);
+
+  // Sous Windows (Electron), associe tout repli générique à une police système installée
   if (isDesktopApp() && blocks.length > 0) {
     for (const block of blocks) {
+      if (block.detectedFontLabel?.includes('(installée)')) {
+        continue;
+      }
       const matched = await resolveBestDesktopFontMatch({
         fontFamily: block.style.fontFamily,
         detectedFontLabel: block.detectedFontLabel,

@@ -13,6 +13,10 @@ interface AnnotationsOverlayLayerProps {
   activeColor: string;
   activeStrokeWidth: number;
   activeStampText: string;
+  activeFontFamily?: string;
+  activeFontSize?: number;
+  activeBold?: boolean;
+  activeItalic?: boolean;
   pendingSignatureUrl: string | null;
   annotations: PageAnnotation[];
   selectedAnnotationId: string | null;
@@ -98,6 +102,10 @@ export function AnnotationsOverlayLayer({
   activeColor,
   activeStrokeWidth,
   activeStampText,
+  activeFontFamily = 'Arial, Helvetica, sans-serif',
+  activeFontSize = 13,
+  activeBold = false,
+  activeItalic = false,
   pendingSignatureUrl,
   annotations,
   selectedAnnotationId,
@@ -182,19 +190,25 @@ export function AnnotationsOverlayLayer({
 
     if (kind === 'date') {
       const today = new Date().toLocaleDateString('fr-FR');
+      const fontSize = Math.max(8, Math.round(activeFontSize));
+      const boxHeight = Math.max(22, Math.round(fontSize * 1.65));
+      const boxWidth = Math.max(88, Math.round(today.length * fontSize * 0.68 + 18));
       onAddAnnotation(
         {
           id: createId('ann'),
           pageNumber,
           kind: 'date',
           x: Math.max(0, pt.x - 4),
-          y: Math.max(0, pt.y - 8),
-          width: 96,
-          height: 22,
+          y: Math.max(0, pt.y - Math.round(boxHeight * 0.45)),
+          width: boxWidth,
+          height: boxHeight,
           color: activeColor,
           strokeWidth: 1,
           text: today,
-          fontSize: 13,
+          fontSize,
+          fontFamily: activeFontFamily,
+          bold: activeBold,
+          italic: activeItalic,
         },
         'Ajouter la date',
       );
@@ -202,29 +216,40 @@ export function AnnotationsOverlayLayer({
     }
 
     if (kind === 'free-text') {
+      event.preventDefault();
       const id = createId('ann');
+      const fontSize = Math.max(8, Math.round(activeFontSize));
+      const boxHeight = Math.max(24, Math.round(fontSize * 1.75));
+      const boxWidth = Math.max(140, Math.round(fontSize * 11));
+      const initialText = 'Texte saisi';
       onAddAnnotation(
         {
           id,
           pageNumber,
           kind: 'free-text',
           x: Math.max(0, pt.x - 4),
-          y: Math.max(0, pt.y - 9),
-          width: 150,
-          height: 26,
+          y: Math.max(0, pt.y - Math.round(boxHeight * 0.45)),
+          width: boxWidth,
+          height: boxHeight,
           color: activeColor,
           strokeWidth: 1,
-          text: 'Texte saisi',
-          fontSize: 13,
+          text: initialText,
+          fontSize,
+          fontFamily: activeFontFamily,
+          bold: activeBold,
+          italic: activeItalic,
         },
         'Ajouter un texte libre',
       );
+      setDraftNoteText(initialText);
       setEditingId(id);
       return;
     }
 
     if (kind === 'note') {
+      event.preventDefault();
       const id = createId('ann');
+      const initialNote = 'Note sur ce passage';
       onAddAnnotation(
         {
           id,
@@ -236,10 +261,11 @@ export function AnnotationsOverlayLayer({
           height: 26,
           color: '#111827',
           strokeWidth: 1,
-          text: 'Note sur ce passage',
+          text: initialNote,
         },
         'Ajouter une note',
       );
+      setDraftNoteText(initialNote);
       setEditingId(id);
       return;
     }
@@ -708,7 +734,13 @@ export function AnnotationsOverlayLayer({
                   autoFocus
                   className="annot-inline-input"
                   value={draftNoteText}
-                  style={{ color: ann.color, fontSize: (ann.fontSize ?? 13) * zoom }}
+                  style={{
+                    color: ann.color,
+                    fontSize: (ann.fontSize ?? 13) * zoom,
+                    fontFamily: ann.fontFamily ?? 'Arial, Helvetica, sans-serif',
+                    fontWeight: ann.bold ? 700 : 400,
+                    fontStyle: ann.italic ? 'italic' : 'normal',
+                  }}
                   onChange={(e) => setDraftNoteText(e.target.value)}
                   onBlur={() => commitInlineText(ann, draftNoteText)}
                   onKeyDown={(e) => {
@@ -724,7 +756,13 @@ export function AnnotationsOverlayLayer({
               ) : (
                 <span
                   className="annot-free-text-label"
-                  style={{ color: ann.color, fontSize: (ann.fontSize ?? 13) * zoom }}
+                  style={{
+                    color: ann.color,
+                    fontSize: (ann.fontSize ?? 13) * zoom,
+                    fontFamily: ann.fontFamily ?? 'Arial, Helvetica, sans-serif',
+                    fontWeight: ann.bold ? 700 : 400,
+                    fontStyle: ann.italic ? 'italic' : 'normal',
+                  }}
                 >
                   {ann.text}
                 </span>

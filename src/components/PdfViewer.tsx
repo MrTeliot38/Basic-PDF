@@ -40,6 +40,10 @@ interface PdfViewerProps {
   activeToolColor: string;
   activeStrokeWidth: number;
   activeStampText: string;
+  activeToolFontFamily?: string;
+  activeToolFontSize?: number;
+  activeToolBold?: boolean;
+  activeToolItalic?: boolean;
   pendingSignatureUrl: string | null;
   searchMatches: SearchMatch[];
   activeSearchMatch: SearchMatch | null;
@@ -120,6 +124,10 @@ interface PdfPageCanvasProps {
   activeToolColor: string;
   activeStrokeWidth: number;
   activeStampText: string;
+  activeToolFontFamily?: string;
+  activeToolFontSize?: number;
+  activeToolBold?: boolean;
+  activeToolItalic?: boolean;
   pendingSignatureUrl: string | null;
   searchMatches: SearchMatch[];
   activeSearchMatch: SearchMatch | null;
@@ -187,6 +195,10 @@ function PdfPageCanvas({
   activeToolColor,
   activeStrokeWidth,
   activeStampText,
+  activeToolFontFamily = 'Arial, Helvetica, sans-serif',
+  activeToolFontSize = 13,
+  activeToolBold = false,
+  activeToolItalic = false,
   pendingSignatureUrl,
   searchMatches,
   activeSearchMatch,
@@ -391,6 +403,10 @@ function PdfPageCanvas({
         activeColor={activeToolColor}
         activeStrokeWidth={activeStrokeWidth}
         activeStampText={activeStampText}
+        activeFontFamily={activeToolFontFamily}
+        activeFontSize={activeToolFontSize}
+        activeBold={activeToolBold}
+        activeItalic={activeToolItalic}
         pendingSignatureUrl={pendingSignatureUrl}
         annotations={annotations}
         selectedAnnotationId={selectedAnnotationId}
@@ -421,6 +437,10 @@ export function PdfViewer({
   activeToolColor,
   activeStrokeWidth,
   activeStampText,
+  activeToolFontFamily = 'Arial, Helvetica, sans-serif',
+  activeToolFontSize = 13,
+  activeToolBold = false,
+  activeToolItalic = false,
   pendingSignatureUrl,
   searchMatches,
   activeSearchMatch,
@@ -832,6 +852,10 @@ export function PdfViewer({
               activeToolColor={activeToolColor}
               activeStrokeWidth={activeStrokeWidth}
               activeStampText={activeStampText}
+              activeToolFontFamily={activeToolFontFamily}
+              activeToolFontSize={activeToolFontSize}
+              activeToolBold={activeToolBold}
+              activeToolItalic={activeToolItalic}
               pendingSignatureUrl={pendingSignatureUrl}
               searchMatches={searchMatches}
               activeSearchMatch={activeSearchMatch}

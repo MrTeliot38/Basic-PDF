@@ -28,6 +28,46 @@ export async function loadInstalledSystemFonts(): Promise<DesktopSystemFontInfo[
   return cachedFontsPromise;
 }
 
+/** Charge la liste complète des polices système ou navigateur disponibles (sans popup) */
+export async function loadAvailableCandidateFonts(): Promise<{
+  fonts: Array<{ family: string; category?: 'sans-serif' | 'serif' | 'monospace' }>;
+  usingSystemFonts: boolean;
+}> {
+  if (isDesktopApp()) {
+    const sys = await loadInstalledSystemFonts();
+    if (sys.length > 0) {
+      return { fonts: sys, usingSystemFonts: true };
+    }
+  }
+
+  if (typeof window !== 'undefined') {
+    const queryLocalFonts = (
+      window as unknown as { queryLocalFonts?: () => Promise<Array<{ family: string }>> }
+    ).queryLocalFonts;
+    if (typeof queryLocalFonts === 'function' && navigator.permissions?.query) {
+      try {
+        const status = await navigator.permissions.query({
+          name: 'local-fonts' as PermissionName,
+        });
+        if (status.state === 'granted') {
+          const local = await queryLocalFonts();
+          const unique = Array.from(new Set(local.map((f) => f.family))).map((family) => ({
+            family,
+            category: classifyFontCategory(family),
+          }));
+          if (unique.length > 0) {
+            return { fonts: unique, usingSystemFonts: true };
+          }
+        }
+      } catch {
+        // Permission non accordée ou navigateur incompatible
+      }
+    }
+  }
+
+  return { fonts: [], usingSystemFonts: false };
+}
+
 /**
  * Associe une famille CSS ou un indice PDF à la police Windows installée la plus proche,
  * afin de la proposer automatiquement à l'écran et à l'enregistrement du PDF.
@@ -42,8 +82,21 @@ export async function resolveBestDesktopFontMatch(hint: {
   }
 
   const category = classifyFontCategory(`${hint.fontFamily} ${hint.detectedFontLabel ?? ''}`);
+  // Extrait le premier nom explicite de la pile CSS ou du libellé nettoyé
+  const cleanedLabel = (hint.detectedFontLabel ?? '')
+    .replace(/\((installée|détectée)\)/gi, '')
+    .trim();
+  const primaryCssName = hint.fontFamily
+    .split(',')[0]
+    ?.replace(/["']/g, '')
+    .replace(/^(sans-serif|serif|monospace)$/i, '')
+    .trim();
+  const pdfFontNameHint = cleanedLabel && !cleanedLabel.includes('(')
+    ? cleanedLabel
+    : primaryCssName;
+
   const closest = findClosestInstalledFontName(fonts, {
-    pdfFontName: hint.detectedFontLabel,
+    pdfFontName: pdfFontNameHint,
     category,
   });
 

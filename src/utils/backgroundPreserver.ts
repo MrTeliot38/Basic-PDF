@@ -2,6 +2,10 @@
 // et détection automatique du style visuel (couleur, graisse, italique, famille de police)
 
 import type { BackgroundPatch } from '../types/pdf';
+import {
+  extractScanBinaryCropFromRgba,
+  formatCssFontStack,
+} from './fontRecognizer';
 
 export interface RgbaRect {
   x: number;
@@ -22,9 +26,17 @@ export const CURATED_FONT_FAMILIES = [
   { label: 'Sans-serif (Arial / Helvetica)', value: 'Arial, Helvetica, sans-serif' },
   { label: 'Serif (Times / Georgia)', value: 'Georgia, "Times New Roman", serif' },
   { label: 'Chasse fixe (Courier)', value: '"Courier New", Consolas, monospace' },
-  { label: 'Verdana', value: 'Verdana, Geneva, sans-serif' },
-  { label: 'Trebuchet MS', value: '"Trebuchet MS", sans-serif' },
+  { label: 'Times New Roman', value: '"Times New Roman", serif' },
+  { label: 'Calibri', value: '"Calibri", sans-serif' },
+  { label: 'Calibri Light', value: '"Calibri Light", sans-serif' },
+  { label: 'Cambria', value: '"Cambria", serif' },
+  { label: 'Georgia', value: '"Georgia", serif' },
+  { label: 'Garamond', value: '"Garamond", serif' },
   { label: 'Palatino', value: '"Palatino Linotype", "Book Antiqua", Georgia, serif' },
+  { label: 'Segoe UI', value: '"Segoe UI", sans-serif' },
+  { label: 'Verdana', value: 'Verdana, Geneva, sans-serif' },
+  { label: 'Tahoma', value: '"Tahoma", sans-serif' },
+  { label: 'Trebuchet MS', value: '"Trebuchet MS", sans-serif' },
 ] as const;
 
 function clampByte(v: number): number {
@@ -491,73 +503,67 @@ export function analyzeTextVisualStyle(
     inkColor = rgbToHex(sumR / sampleCount, sumG / sampleCount, sumB / sampleCount);
   }
 
-  // Indice de graisse : densité de pixels d'encre + présence éventuelle dans le nom de police
+  const cropMetrics = extractScanBinaryCropFromRgba(data, w, h);
+
+  // Indice de graisse : densité de pixels d'encre, épaisseur relative de trait et indice éventuel
   const inkRatio = inkPixels.length / (w * h);
   const lowerHint = (hintFontName ?? '').toLowerCase();
+  const adjustedStrokeRatio = cropMetrics
+    ? Math.max(0, cropMetrics.strokeWidthRatio - 0.65 / Math.max(10, cropMetrics.height))
+    : 0;
   const isBold =
     lowerHint.includes('bold') ||
     lowerHint.includes('black') ||
     lowerHint.includes('heavy') ||
-    inkRatio > 0.3;
+    inkRatio > 0.34 ||
+    Boolean(cropMetrics && (adjustedStrokeRatio > 0.15 || cropMetrics.fillRatio > 0.38));
 
-  // Indice d'italique par nom de police ou inclinaison moyenne des glyphes
-  let isItalic = lowerHint.includes('italic') || lowerHint.includes('oblique');
-  if (!isItalic && inkPixels.length > 30 && h >= 12) {
-    // Mesure si le haut des lettres est décalé vers la droite par rapport au bas
-    let topSumX = 0;
-    let topCount = 0;
-    let botSumX = 0;
-    let botCount = 0;
-    for (const p of inkPixels) {
-      if (p.y < h * 0.35) {
-        topSumX += p.x;
-        topCount += 1;
-      } else if (p.y > h * 0.65) {
-        botSumX += p.x;
-        botCount += 1;
-      }
-    }
-    if (topCount > 5 && botCount > 5) {
-      const slantPx = topSumX / topCount - botSumX / botCount;
-      if (slantPx > Math.max(1.5, h * 0.08)) {
-        isItalic = true;
-      }
-    }
-  }
+  // Indice d'italique fiable par composante connexe individuelle (ou nom de police)
+  const isItalic =
+    lowerHint.includes('italic') ||
+    lowerHint.includes('oblique') ||
+    Boolean(cropMetrics && cropMetrics.medianSlant > 0.115);
 
-  // Choix de la famille la plus proche : indice PDF/Tesseract ou analyse empattements (serifs)
+  // Choix de la famille la plus proche : indice PDF/Tesseract ou analyse morphologique locale
   const hintWithoutSans = lowerHint.replace(/sans-serif/g, 'sansserif');
   let fontFamily: string = CURATED_FONT_FAMILIES[0].value;
   let detectedFontLabel: string = CURATED_FONT_FAMILIES[0].label;
 
-  if (
-    hintWithoutSans.includes('times') ||
-    hintWithoutSans.includes('georgia') ||
-    hintWithoutSans.includes('serif') ||
-    hintWithoutSans.includes('garamond') ||
-    hintWithoutSans.includes('palatino')
-  ) {
+  const knownNamedMatches: Array<[string, string, 'sans-serif' | 'serif' | 'monospace']> = [
+    ['calibri light', 'Calibri Light', 'sans-serif'],
+    ['calibri', 'Calibri', 'sans-serif'],
+    ['cambria', 'Cambria', 'serif'],
+    ['times', 'Times New Roman', 'serif'],
+    ['georgia', 'Georgia', 'serif'],
+    ['garamond', 'Garamond', 'serif'],
+    ['palatino', 'Palatino Linotype', 'serif'],
+    ['book antiqua', 'Book Antiqua', 'serif'],
+    ['constantia', 'Constantia', 'serif'],
+    ['verdana', 'Verdana', 'sans-serif'],
+    ['segoe ui', 'Segoe UI', 'sans-serif'],
+    ['tahoma', 'Tahoma', 'sans-serif'],
+    ['trebuchet', 'Trebuchet MS', 'sans-serif'],
+    ['candara', 'Candara', 'sans-serif'],
+    ['corbel', 'Corbel', 'sans-serif'],
+    ['consolas', 'Consolas', 'monospace'],
+    ['courier', 'Courier New', 'monospace'],
+  ];
+
+  const namedHit = knownNamedMatches.find(([kw]) => hintWithoutSans.includes(kw));
+  if (namedHit) {
+    fontFamily = formatCssFontStack(namedHit[1], namedHit[2]);
+    detectedFontLabel = namedHit[1];
+  } else if (hintWithoutSans.includes('serif') || hintWithoutSans.includes('roman')) {
     fontFamily = CURATED_FONT_FAMILIES[1].value;
     detectedFontLabel = CURATED_FONT_FAMILIES[1].label;
-  } else if (
-    lowerHint.includes('courier') ||
-    lowerHint.includes('mono') ||
-    lowerHint.includes('consolas')
-  ) {
+  } else if (lowerHint.includes('mono')) {
     fontFamily = CURATED_FONT_FAMILIES[2].value;
     detectedFontLabel = CURATED_FONT_FAMILIES[2].label;
-  } else if (!hintFontName && inkPixels.length > 40 && h >= 14) {
-    // Heuristique simple pour les scans : les polices Serif ont nettement plus d'encre aux empattements haut/bas
-    let edgeInk = 0;
-    let midInk = 0;
-    for (const p of inkPixels) {
-      if (p.y <= Math.floor(h * 0.2) || p.y >= Math.floor(h * 0.8)) {
-        edgeInk += 1;
-      } else if (p.y >= Math.floor(h * 0.36) && p.y <= Math.floor(h * 0.64)) {
-        midInk += 1;
-      }
-    }
-    if (midInk > 0 && edgeInk / midInk > 2.4) {
+  } else if (cropMetrics) {
+    if (cropMetrics.isMonospace) {
+      fontFamily = CURATED_FONT_FAMILIES[2].value;
+      detectedFontLabel = `${CURATED_FONT_FAMILIES[2].label} (détectée)`;
+    } else if (cropMetrics.serifScore >= 1.24) {
       fontFamily = CURATED_FONT_FAMILIES[1].value;
       detectedFontLabel = `${CURATED_FONT_FAMILIES[1].label} (détectée)`;
     } else {

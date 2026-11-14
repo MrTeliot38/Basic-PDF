@@ -8,6 +8,10 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 const SCREENSHOTS_DIR =
   'C:\\Users\\roly_\\.gemini\\antigravity\\brain\\73218bb9-b8fe-40ea-aeca-18e39db6903b\\screenshots';
+const PKG_VERSION =
+  (JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')) as {
+    version?: string;
+  }).version ?? '0.2.0';
 
 async function createSampleFileOnDisk(filePath: string, headingText: string): Promise<void> {
   const doc = await PDFDocument.create();
@@ -162,7 +166,7 @@ test.describe('Phase B : Application Windows Electron réelle', () => {
         name: 'Paramètres Windows et mises à jour',
       });
       await expect(settingsModal).toBeVisible();
-      await expect(settingsModal).toContainText('Basic PDF 0.1.0');
+      await expect(settingsModal).toContainText(`Basic PDF ${PKG_VERSION}`);
       await expect(settingsModal).toContainText('polices Windows détectées localement');
       await expect(settingsModal).toContainText('Aucune connexion Internet');
       await expect(settingsModal.getByRole('button', { name: 'Vérifier maintenant' })).toBeVisible();

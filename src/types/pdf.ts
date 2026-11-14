@@ -159,6 +159,9 @@ export interface PageAnnotation {
   /** Texte associé (note, tampon, texte libre, date) */
   text?: string;
   fontSize?: number;
+  fontFamily?: string;
+  bold?: boolean;
+  italic?: boolean;
   /** Signature dessinée ou importée en PNG transparent */
   imageDataUrl?: string;
 }

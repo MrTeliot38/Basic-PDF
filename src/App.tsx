@@ -1,7 +1,10 @@
 // Composant racine de Basic PDF : orchestre onglets, recherche, texte, OCR, images, formulaires, signatures, annotations, pages, compression, impression et partage
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, ScanText, X } from 'lucide-react';
-import { AnnotationToolsBar } from './components/AnnotationToolsBar';
+import {
+  AnnotationToolsBar,
+  type AnnotationFontStylePatch,
+} from './components/AnnotationToolsBar';
 import { AndroidSettingsModal } from './components/AndroidSettingsModal';
 import { CompressModal } from './components/CompressModal';
 import { DesktopSettingsModal } from './components/DesktopSettingsModal';
@@ -43,6 +46,7 @@ import {
 } from './utils/androidBridge';
 import { getDesktopBridge, isDesktopApp } from './utils/desktopBridge';
 import { ZOOM_STEP } from './utils/formatters';
+import { computeDominantDocumentTextStyle } from './utils/fontRecognizer';
 import { runOfflineOcrOnPage } from './utils/ocrEngine';
 import { readImageFileAsPngDataUrl } from './utils/pdfImageExtractor';
 import { formatPdfError, readPdfFile } from './utils/pdfLoader';
@@ -96,6 +100,9 @@ export function App() {
   const [activeStrokeWidth, setActiveStrokeWidth] = useState(3);
   const [activeStampText, setActiveStampText] = useState('APPROUVÉ');
   const [pendingSignatureUrl, setPendingSignatureUrl] = useState<string | null>(null);
+  const [annotFontOverridesByTab, setAnnotFontOverridesByTab] = useState<
+    Record<string, { fontFamily: string; fontSize: number; bold: boolean; italic: boolean }>
+  >({});
 
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1460,6 +1467,94 @@ export function App() {
     : null;
   const deletedImagesOnPage = currentPageImages.filter((img) => img.status === 'deleted');
 
+  // Harmonise par défaut la police de "Texte libre" et "Date" avec la police principale du document
+  const dominantDocStyle = useMemo(
+    () => (activeTab ? computeDominantDocumentTextStyle(activeTab.textBlocksByPage) : null),
+    [activeTab?.textBlocksByPage],
+  );
+
+  const defaultAnnotFontStyle = useMemo(() => {
+    if (activeTab && annotFontOverridesByTab[activeTab.id]) {
+      return annotFontOverridesByTab[activeTab.id];
+    }
+    if (dominantDocStyle) {
+      return {
+        fontFamily: dominantDocStyle.fontFamily,
+        fontSize: Math.max(8, Math.min(48, Math.round(dominantDocStyle.fontSize))),
+        bold: dominantDocStyle.bold,
+        italic: dominantDocStyle.italic,
+      };
+    }
+    return {
+      fontFamily: 'Arial, Helvetica, sans-serif',
+      fontSize: 13,
+      bold: false,
+      italic: false,
+    };
+  }, [activeTab, annotFontOverridesByTab, dominantDocStyle]);
+
+  const selectedAnnotation = useMemo(() => {
+    if (!activeTab?.selectedAnnotationId) return null;
+    for (const list of Object.values(activeTab.annotationsByPage)) {
+      const found = list.find((a) => a.id === activeTab.selectedAnnotationId);
+      if (found) return found;
+    }
+    return null;
+  }, [activeTab]);
+
+  const isTextAnnotationSelected =
+    selectedAnnotation?.kind === 'free-text' || selectedAnnotation?.kind === 'date';
+
+  const effectiveAnnotFontStyle = isTextAnnotationSelected && selectedAnnotation
+    ? {
+        fontFamily: selectedAnnotation.fontFamily ?? defaultAnnotFontStyle.fontFamily,
+        fontSize: selectedAnnotation.fontSize ?? defaultAnnotFontStyle.fontSize,
+        bold: Boolean(selectedAnnotation.bold),
+        italic: Boolean(selectedAnnotation.italic),
+      }
+    : defaultAnnotFontStyle;
+
+  const handleChangeAnnotColor = useCallback(
+    (nextColor: string) => {
+      setActiveToolColor(nextColor);
+      if (activeTab && isTextAnnotationSelected && selectedAnnotation) {
+        updateAnnotation(
+          activeTab.id,
+          selectedAnnotation.id,
+          "Modifier la couleur de l'annotation",
+          (ann) => ({ ...ann, color: nextColor }),
+        );
+      }
+    },
+    [activeTab, isTextAnnotationSelected, selectedAnnotation, updateAnnotation],
+  );
+
+  const handleChangeAnnotFontStyle = useCallback(
+    (patch: AnnotationFontStylePatch) => {
+      if (!activeTab) return;
+      const merged = { ...effectiveAnnotFontStyle, ...patch };
+      setAnnotFontOverridesByTab((prev) => ({
+        ...prev,
+        [activeTab.id]: merged,
+      }));
+      if (isTextAnnotationSelected && selectedAnnotation) {
+        updateAnnotation(
+          activeTab.id,
+          selectedAnnotation.id,
+          "Modifier la police de l'annotation",
+          (ann) => ({
+            ...ann,
+            fontFamily: patch.fontFamily ?? ann.fontFamily,
+            fontSize: patch.fontSize ?? ann.fontSize,
+            bold: patch.bold !== undefined ? patch.bold : ann.bold,
+            italic: patch.italic !== undefined ? patch.italic : ann.italic,
+          }),
+        );
+      }
+    },
+    [activeTab, effectiveAnnotFontStyle, isTextAnnotationSelected, selectedAnnotation, updateAnnotation],
+  );
+
   const showImageInspector =
     Boolean(activeTab) &&
     (toolMode === 'select-image' ||
@@ -1626,18 +1721,41 @@ export function App() {
               {annotationBarOpen && (
                 <AnnotationToolsBar
                   toolMode={toolMode}
-                  activeColor={activeToolColor}
+                  activeColor={
+                    isTextAnnotationSelected && selectedAnnotation
+                      ? selectedAnnotation.color
+                      : activeToolColor
+                  }
                   activeStrokeWidth={activeStrokeWidth}
                   activeStampText={activeStampText}
+                  showTextFontOptions={
+                    toolMode === 'fill-free-text' ||
+                    toolMode === 'fill-date' ||
+                    isTextAnnotationSelected
+                  }
+                  activeFontFamily={effectiveAnnotFontStyle.fontFamily}
+                  activeFontSize={effectiveAnnotFontStyle.fontSize}
+                  activeBold={effectiveAnnotFontStyle.bold}
+                  activeItalic={effectiveAnnotFontStyle.italic}
                   onSelectTool={(mode) => {
+                    if (mode !== toolMode) {
+                      selectAnnotation(activeTab.id, null);
+                    }
                     if (mode === 'sign' && !pendingSignatureUrl) {
                       setSignatureModalOpen(true);
                     }
+                    if (
+                      (mode === 'fill-free-text' || mode === 'fill-date') &&
+                      activeToolColor.toLowerCase() === '#fde047'
+                    ) {
+                      setActiveToolColor(dominantDocStyle?.color ?? '#111827');
+                    }
                     setToolMode(mode);
                   }}
-                  onChangeColor={setActiveToolColor}
+                  onChangeColor={handleChangeAnnotColor}
                   onChangeStrokeWidth={setActiveStrokeWidth}
                   onChangeStampText={setActiveStampText}
+                  onChangeFontStyle={handleChangeAnnotFontStyle}
                   onOpenSignatureModal={() => setSignatureModalOpen(true)}
                   onCloseBar={() => {
                     setAnnotationBarOpen(false);
@@ -1734,6 +1852,10 @@ export function App() {
                   activeToolColor={activeToolColor}
                   activeStrokeWidth={activeStrokeWidth}
                   activeStampText={activeStampText}
+                  activeToolFontFamily={defaultAnnotFontStyle.fontFamily}
+                  activeToolFontSize={defaultAnnotFontStyle.fontSize}
+                  activeToolBold={defaultAnnotFontStyle.bold}
+                  activeToolItalic={defaultAnnotFontStyle.italic}
                   pendingSignatureUrl={pendingSignatureUrl}
                   searchMatches={searchMatches}
                   activeSearchMatch={activeSearchMatch}

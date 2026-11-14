@@ -453,9 +453,16 @@ export async function serializeDocumentEditsToPdf({
           });
         }
       } else if (annot.kind === 'free-text' || annot.kind === 'date') {
-        const font = await getFont(StandardFonts.Helvetica);
         const size = annot.fontSize ?? 13;
-        const txt = sanitizeWinAnsi(annot.text ?? '');
+        const { font, supportsUnicode } = await getFontForTextStyle({
+          fontFamily: annot.fontFamily ?? 'Arial, Helvetica, sans-serif',
+          fontSize: size,
+          color: annot.color,
+          bold: Boolean(annot.bold),
+          italic: Boolean(annot.italic),
+        });
+        const rawTxt = annot.text ?? '';
+        const txt = supportsUnicode ? rawTxt.trim() : sanitizeWinAnsi(rawTxt);
         if (txt) {
           page.drawText(txt, {
             x: annot.x + 2,

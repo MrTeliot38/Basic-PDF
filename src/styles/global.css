@@ -1438,6 +1438,14 @@ input:focus-visible {
   color: var(--text-secondary);
 }
 
+.annot-font-select {
+  max-width: 170px;
+}
+
+.annot-fontsize-input {
+  width: 56px;
+}
+
 /* Couche interactive des annotations */
 .annotations-overlay-layer {
   position: absolute;

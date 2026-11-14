@@ -4,7 +4,12 @@ import type { PDFPageProxy } from 'pdfjs-dist';
 import type { EditableTextBlock, TextStyle } from '../types/pdf';
 import { createId } from './formatters';
 import { analyzeTextVisualStyle, CURATED_FONT_FAMILIES } from './backgroundPreserver';
-import { isDesktopApp, resolveBestDesktopFontMatch } from './desktopBridge';
+import {
+  isDesktopApp,
+  loadAvailableCandidateFonts,
+  resolveBestDesktopFontMatch,
+} from './desktopBridge';
+import { formatCssFontStack, recognizeFontFromScanBlock } from './fontRecognizer';
 
 interface RawTextItem {
   text: string;
@@ -19,18 +24,36 @@ interface RawTextItem {
 
 /** Déduit un style CSS approximatif à partir des métadonnées de police PDF.js */
 function inferStyleFromPdfFont(fontFamilyStr: string, fontName: string, fontSize: number): TextStyle {
-  const hint = `${fontFamilyStr} ${fontName}`.toLowerCase();
+  const cleanName = fontName.replace(/^[A-Z]{6}\+/, '');
+  const hint = `${fontFamilyStr} ${cleanName}`.toLowerCase();
   const hintWithoutSans = hint.replace(/sans-serif/g, 'sansserif');
   let fontFamily: string = CURATED_FONT_FAMILIES[0].value;
 
-  if (
-    hintWithoutSans.includes('times') ||
-    hintWithoutSans.includes('serif') ||
-    hintWithoutSans.includes('georgia') ||
-    hintWithoutSans.includes('garamond')
-  ) {
+  const knownMap: Array<[string, string, 'sans-serif' | 'serif' | 'monospace']> = [
+    ['calibrilight', 'Calibri Light', 'sans-serif'],
+    ['calibri-light', 'Calibri Light', 'sans-serif'],
+    ['calibri', 'Calibri', 'sans-serif'],
+    ['cambria', 'Cambria', 'serif'],
+    ['timesnewroman', 'Times New Roman', 'serif'],
+    ['times-roman', 'Times New Roman', 'serif'],
+    ['times', 'Times New Roman', 'serif'],
+    ['georgia', 'Georgia', 'serif'],
+    ['garamond', 'Garamond', 'serif'],
+    ['palatino', 'Palatino Linotype', 'serif'],
+    ['verdana', 'Verdana', 'sans-serif'],
+    ['segoeui', 'Segoe UI', 'sans-serif'],
+    ['tahoma', 'Tahoma', 'sans-serif'],
+    ['trebuchet', 'Trebuchet MS', 'sans-serif'],
+    ['consolas', 'Consolas', 'monospace'],
+    ['courier', 'Courier New', 'monospace'],
+  ];
+
+  const hit = knownMap.find(([kw]) => hintWithoutSans.replace(/\s+/g, '').includes(kw) || hintWithoutSans.includes(kw));
+  if (hit) {
+    fontFamily = formatCssFontStack(hit[1], hit[2]);
+  } else if (hintWithoutSans.includes('serif') || hintWithoutSans.includes('roman')) {
     fontFamily = CURATED_FONT_FAMILIES[1].value;
-  } else if (hint.includes('courier') || hint.includes('mono') || hint.includes('consolas')) {
+  } else if (hint.includes('mono')) {
     fontFamily = CURATED_FONT_FAMILIES[2].value;
   }
 
@@ -106,6 +129,10 @@ export async function extractNativeTextBlocks(
   }
   groups.push(currentGroup);
 
+  const { fonts: candidateFonts, usingSystemFonts } = cleanCanvas
+    ? await loadAvailableCandidateFonts()
+    : { fonts: [], usingSystemFonts: false };
+
   const blocks: EditableTextBlock[] = groups.map((group) => {
     let text = '';
     for (let i = 0; i < group.length; i += 1) {
@@ -128,7 +155,22 @@ export async function extractNativeTextBlocks(
 
     const firstFont = group[0].fontName;
     const styleMeta = styles[firstFont];
-    const baseStyle = inferStyleFromPdfFont(styleMeta?.fontFamily ?? '', firstFont, avgFontSize);
+    let pdfFontObjName = '';
+    try {
+      const commonObjs = (page as unknown as {
+        commonObjs?: { has?: (id: string) => boolean; get?: (id: string) => { name?: string } };
+      }).commonObjs;
+      if (firstFont && commonObjs?.has?.(firstFont)) {
+        pdfFontObjName = commonObjs.get?.(firstFont)?.name ?? '';
+      }
+    } catch {
+      // Certaines polices PDF.js peuvent ne pas exposer commonObjs
+    }
+    const combinedFontHint = `${styleMeta?.fontFamily ?? ''} ${pdfFontObjName || firstFont}`.trim();
+    const baseStyle = inferStyleFromPdfFont(styleMeta?.fontFamily ?? '', pdfFontObjName || firstFont, avgFontSize);
+    const hasExplicitPdfFontName =
+      Boolean(pdfFontObjName) &&
+      !/^(?:f\d+|g_d\d+_f\d+|tt\d+)$/i.test(pdfFontObjName.trim());
 
     let finalStyle = { ...baseStyle };
     let detectedFontLabel: string | undefined;
@@ -142,16 +184,54 @@ export async function extractNativeTextBlocks(
           width: (maxX - minX) * canvasScale,
           height: (maxY - minY) * canvasScale,
         },
-        `${styleMeta?.fontFamily ?? ''} ${firstFont}`.trim(),
+        combinedFontHint,
       );
       finalStyle = {
         ...finalStyle,
         color: visual.color,
         fontFamily: visual.fontFamily,
-        bold: finalStyle.bold || visual.bold,
-        italic: finalStyle.italic || visual.italic,
+        bold: hasExplicitPdfFontName ? finalStyle.bold : finalStyle.bold || visual.bold,
+        italic: hasExplicitPdfFontName ? finalStyle.italic : finalStyle.italic || visual.italic,
       };
       detectedFontLabel = visual.detectedFontLabel;
+
+      const isGenericLabel =
+        !detectedFontLabel ||
+        detectedFontLabel.startsWith('Sans-serif') ||
+        detectedFontLabel.startsWith('Serif') ||
+        detectedFontLabel.startsWith('Chasse fixe');
+      if (isGenericLabel && !hasExplicitPdfFontName) {
+        const visualRecognized = recognizeFontFromScanBlock({
+          pageCanvas: cleanCanvas,
+          blockRectPx: {
+            x: minX * canvasScale,
+            y: minY * canvasScale,
+            width: (maxX - minX) * canvasScale,
+            height: (maxY - minY) * canvasScale,
+          },
+          words: group.map((g) => ({
+            text: g.text,
+            x0: g.x * canvasScale,
+            y0: g.y * canvasScale,
+            x1: (g.x + g.width) * canvasScale,
+            y1: (g.y + g.height) * canvasScale,
+          })),
+          blockText: text,
+          installedFamilies: candidateFonts,
+          usingSystemFonts,
+          hintBold: finalStyle.bold,
+          hintItalic: finalStyle.italic,
+        });
+        if (visualRecognized) {
+          finalStyle = {
+            ...finalStyle,
+            fontFamily: visualRecognized.fontFamily,
+            bold: finalStyle.bold || visualRecognized.bold,
+            italic: finalStyle.italic || visualRecognized.italic,
+          };
+          detectedFontLabel = visualRecognized.detectedFontLabel;
+        }
+      }
     }
 
     const w = Math.max(12, maxX - minX);
@@ -180,6 +260,9 @@ export async function extractNativeTextBlocks(
 
   if (isDesktopApp() && blocks.length > 0) {
     for (const block of blocks) {
+      if (block.detectedFontLabel?.includes('(installée)')) {
+        continue;
+      }
       const matched = await resolveBestDesktopFontMatch({
         fontFamily: block.style.fontFamily,
         detectedFontLabel: block.detectedFontLabel,

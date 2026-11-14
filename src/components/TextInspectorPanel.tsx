@@ -4,6 +4,7 @@ import { Bold, Edit3, Italic, RotateCcw, Trash2, Type, X } from 'lucide-react';
 import type { EditableTextBlock, TextStyle } from '../types/pdf';
 import { CURATED_FONT_FAMILIES } from '../utils/backgroundPreserver';
 import { isDesktopApp, loadInstalledSystemFonts } from '../utils/desktopBridge';
+import { formatCssFontStack } from '../utils/fontRecognizer';
 
 interface TextInspectorPanelProps {
   selectedBlock: EditableTextBlock | null;
@@ -215,16 +216,28 @@ export function TextInspectorPanel({
                       {f.label}
                     </option>
                   ))}
+                  {!CURATED_FONT_FAMILIES.some((f) => f.value === selectedBlock.style.fontFamily) &&
+                    !localFonts.some(
+                      (family) =>
+                        formatCssFontStack(family) === selectedBlock.style.fontFamily ||
+                        selectedBlock.style.fontFamily
+                          .toLowerCase()
+                          .includes(`"${family.toLowerCase()}"`),
+                    ) && (
+                      <option value={selectedBlock.style.fontFamily}>
+                        {selectedBlock.style.fontFamily.split(',')[0].replace(/["']/g, '')}
+                      </option>
+                    )}
                 </optgroup>
                 {localFonts.length > 0 && (
                   <optgroup label={`Polices installées sur l’ordinateur (${localFonts.length})`}>
                     {localFonts.map((family) => {
-                      const matchedCurated = selectedBlock.style.fontFamily
+                      const matchedCurrent = selectedBlock.style.fontFamily
                         .toLowerCase()
                         .includes(`"${family.toLowerCase()}"`);
-                      const optionValue = matchedCurated
+                      const optionValue = matchedCurrent
                         ? selectedBlock.style.fontFamily
-                        : `"${family}", sans-serif`;
+                        : formatCssFontStack(family);
                       return (
                         <option key={family} value={optionValue}>
                           {family}
