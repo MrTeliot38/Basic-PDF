@@ -88,6 +88,12 @@ jobs:
             release/*.apk.sha256
             release/SHA256SUMS-android.txt
 
+      - name: Éviter une création simultanée de Release avec Windows
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || sleep 25
+
       - name: Attacher l'APK à la Release GitHub lors d'un tag de version
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
